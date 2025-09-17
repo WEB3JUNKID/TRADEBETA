@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeBeta — Your Market Analyst</title>
+<link rel="stylesheet" href="signup.css">
+<style>
+  /* Reset margins and background so no white rim shows */
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0b1020; /* match your gradient’s dark color */
+    height: 100%;
+  }
+
+  /* Landing page specific styles */
+  .landing-container {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 40px 20px;
+    background: radial-gradient(1200px 800px at 20% -10%, #16224a 0%, #0b1020 50%, #0b1020 100%);
+    color: #e6f3fb;
+  }
+
+  .logo-block {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .logo-circle {
+    width: 60px;
+    height: 60px;
+    background: linear-gradient(135deg,#00d4ff,#59c6ff);
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    font-size: 28px;
+    color: #07121a;
+  }
+
+  .logo-title h1 {
+    margin: 0;
+    font-size: 2rem;
+    color: #00d4ff;
+  }
+
+  .logo-title .sub {
+    font-size: 1rem;
+    color: #9fb2c8;
+  }
+
+  .pitch {
+    max-width: 700px;
+    margin: 30px auto;
+    font-size: 1.2rem;
+    line-height: 1.6;
+    color: rgba(255,255,255,0.85);
+  }
+
+  .cta-buttons {
+    display: flex;
+    gap: 16px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .cta-buttons a {
+    display: inline-block;
+    padding: 14px 30px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 1rem;
+    text-decoration: none;
+    background: linear-gradient(45deg, #3b82f6, #1e40af);
+    color: #fff;
+    transition: opacity 0.3s ease;
+  }
+
+  .cta-buttons a:hover {
+    opacity: 0.9;
+  }
+
+  footer {
+    margin-top: 40px;
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.6);
+  }
+</style>
+</head>
+<body>
+
+<div class="landing-container">
+  <!-- Logo Block -->
+  <div class="logo-block">
+    <div class="logo-circle">Tβ</div>
+    <div class="logo-title">
+      <h1>TradeBeta</h1>
+      <div class="sub">Your go-to Market Analyst</div>
+    </div>
+  </div>
+
+  <!-- Pitch -->
+  <div class="pitch">
+    <strong>TradeBeta</strong> helps traders and investors make smarter decisions by scanning hundreds of assets for 
+    high-confidence signals, trade setups, and risk levels — all in one simple dashboard.  
+    Our algorithms combine technical indicators, price action, and confluence to give you actionable insights.
+  </div>
+
+  <!-- Call to Action Buttons -->
+  <div class="cta-buttons">
+    <a href="signup.html">Get Started — Sign Up</a>
+    <a href="login.html" style="background:linear-gradient(45deg,#059669,#10b981);">Log In</a>
+  </div>
+
+  <footer>
+    &copy; 2025 TradeBeta. All rights reserved.
+  </footer>
+</div>
+
+</body>
+</html>

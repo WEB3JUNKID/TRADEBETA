@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TradeBeta</title>
+<style>
+  :root{
+    --bg:#07121a; --muted:#9fb2c8; --accent:#59c6ff; --good:#86efac; --bad:#ff7b7b;
+    --card-bg: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  }
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,var(--bg),#031219);color:#e6f3fb;padding:18px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+  h1{margin:0;font-size:20px;color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px}
+  .controls{display:flex;gap:8px;align-items:center}
+  button,select{background:#0b1520;border:1px solid rgba(255,255,255,0.03);color:#cfe8ff;padding:8px;border-radius:8px}
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;margin-top:12px}
+  .card{background:var(--card-bg);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+  .h{display:flex;justify-content:space-between;align-items:center}
+  .mono{font-family:ui-monospace,Menlo,Monaco,"Roboto Mono",monospace}
+  .small{font-size:12px;color:var(--muted)}
+  .long{color:var(--good);font-weight:700}
+  .short{color:var(--bad);font-weight:700}
+  .neutral{color:var(--muted);font-weight:700}
+  .sig{margin-top:8px}
+  .muted{color:var(--muted)}
+  .spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.06);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;display:inline-block;margin-left:8px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  footer{margin-top:14px;color:var(--muted);font-size:13px}
+  @media (max-width:760px){#grid{grid-template-columns:1fr}}
+  .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.02);font-size:12px}
+  details summary{cursor:pointer}
+  .muted-block{margin-top:8px;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,0.08);">
+  <!-- Left: Logo + Name -->
+  <div style="display:flex;align-items:center;gap:10px">
+    <!-- Logo circle with Tβ -->
+    <div style="width:40px;height:40px;background:linear-gradient(135deg,#00d4ff,#59c6ff);border-radius:50%;display:flex;justify-content:center;align-items:center;font-weight:bold;font-size:20px;color:#07121a;">
+      Tβ
+    </div>
+    <div>
+      <h1 style="margin:0;font-size:20px;color:#00d4ff;">TradeBeta</h1>
+      <div class="sub" style="font-size:13px;color:#9fb2c8;">Your go-to Market analyst</div>
+    </div>
+  </div>
+
+  <!-- Right: Controls -->
+  <div class="controls" style="display:flex;gap:8px;align-items:center">
+    <button id="refreshBtn">Refresh</button>
+    <button onclick="window.open('history.html','_blank')">History</button>
+    <label class="small">Scan interval:
+      <select id="interval">
+        <option value="30000">30s</option>
+        <option value="60000">1m</option>
+        <option value="120000" selected>2m</option>
+        <option value="300000">5m</option>
+      </select>
+    </label>
+    <label class="small">Display top:
+      <select id="displayCount">
+        <option value="10">10</option>
+        <option value="20" selected>20</option>
+        <option value="50">50</option>
+        <option value="100">100</option>
+      </select>
+    </label>
+    <div id="status" class="small" style="margin-left:10px">Idle</div>
+  </div>
+</header>
+
+  <div id="grid"></div>
+
+  <footer class="small muted">
+Trading financial markets involves substantial risk. Prices can move rapidly, and you may lose part or all of your invested capital. Past performance is not indicative of future results. Only trade with money you can afford to lose, use proper risk management, and avoid making decisions based solely on tips or automated signals. Leverage can magnify both gains and losses.
+  </footer>
+
+<script>
+/* ========== CONFIG ========== */
+const COINGECKO = "https://api.coingecko.com/api/v3";
+const TOP_SCAN = 100;
+const RR = 3;
+const EXCLUDE_STABLES = ["tether","usd-coin","dai","binance-usd","true-usd","frax","usdd","first-digital-usd"];
+const ATR_PERIOD = 14;
+const OVEREXT_PCT = 10;
+let intervalMs = Number(document.getElementById('interval').value);
+let displayCount = Number(document.getElementById('displayCount').value);
+let loopHandle = null;
+
+/* persistent state */
+if(!window.signals) window.signals = {}; // keyed by coin.id
+if(!window.cardMap) window.cardMap = new Map();
+
+/* ========== UTIL ========== */
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function fmtUSD(x){ if(x==null || isNaN(x)) return "N/A"; if(Math.abs(x)>=1000) return "$"+Number(x).toLocaleString(undefined,{maximumFractionDigits:2}); return "$"+Number(x).toFixed(2); }
+function roundN(x,n=2){ return Number(Number(x).toFixed(n)); }
+
+/* EMA */
+function emaSeriesFromCloses(closes, period){
+  const out = new Array(closes.length).fill(null);
+  if(closes.length < period) return out;
+  let sum=0;
+  for(let i=0;i<period;i++) sum += closes[i];
+  let prev = sum/period;
+  out[period-1] = prev;
+  const k = 2/(period+1);
+  for(let i=period;i<closes.length;i++){
+    prev = closes[i]*k + prev*(1-k);
+    out[i] = prev;
+  }
+  return out;
+}
+
+/* ATR */
+function ATR(highs,lows,closes,period=14){
+  if(!highs || highs.length < period+1) return null;
+  const TR = [];
+  for(let i=1;i<highs.length;i++){
+    const tr = Math.max(highs[i]-lows[i], Math.abs(highs[i]-closes[i-1]), Math.abs(lows[i]-closes[i-1]));
+    TR.push(tr);
+  }
+  if(TR.length < period) return null;
+  let atr = TR.slice(0,period).reduce((s,v)=>s+v,0)/period;
+  for(let i=period;i<TR.length;i++){
+    atr = ((atr*(period-1)) + TR[i]) / period;
+  }
+  return atr;
+}
+
+/* Price action */
+function detectPA(candles){
+  if(!candles || candles.length < 2) return {engulf:null, wick:null};
+  const last = candles[candles.length-1];
+  const prev = candles[candles.length-2];
+  const prevBody = Math.abs(prev.c - prev.o);
+  const lastBody = Math.abs(last.c - last.o);
+  let engulf = null;
+  if(prev.c < prev.o && last.c > last.o && lastBody > prevBody && last.c > prev.o && last.o < prev.c) engulf = "bull";
+  else if(prev.c > prev.o && last.c < last.o && lastBody > prevBody && last.o > prev.c && last.c < prev.o) engulf = "bear";
+  const body = lastBody;
+  const upperWick = last.h - Math.max(last.c,last.o);
+  const lowerWick = Math.min(last.c,last.o) - last.l;
+  let wick = null;
+  if(lowerWick > body*2.5 && body < (last.h-last.l)*0.35) wick = "lower-rej";
+  else if(upperWick > body*2.5 && body < (last.h-last.l)*0.35) wick = "upper-rej";
+  return {engulf, wick};
+}
+
+/* Order blocks */
+function findOrderBlocks(candles, lookback=60){
+  const n = candles.length;
+  const start = Math.max(2, n - lookback);
+  let bullOB = null, bearOB = null;
+  for(let i=n-3;i>=start;i--){
+    const c = candles[i];
+    if(!bullOB && c.c < c.o){
+      for(let j=i+1;j<=Math.min(i+3,n-1);j++){
+        if(candles[j].c > c.o * 1.01){
+          bullOB = {index:i, low:c.l, high:c.h};
+          break;
+        }
+      }
+    }
+    if(!bearOB && c.c > c.o){
+      for(let j=i+1;j<=Math.min(i+3,n-1);j++){
+        if(candles[j].c < c.o * 0.99){
+          bearOB = {index:i, low:c.l, high:c.h};
+          break;
+        }
+      }
+    }
+    if(bullOB && bearOB) break;
+  }
+  return {bullOB, bearOB};
+}
+
+/* Pivot calculation */
+function pivots_from_prev(prevHigh, prevLow, prevClose){
+  const P = (prevHigh + prevLow + prevClose)/3;
+  return {
+    P,
+    R1:(2*P)-prevLow,
+    S1:(2*P)-prevHigh
+  };
+}
+
+/* Overlap ratio */
+function zoneOverlapRatio(z1, z2){
+  if(!z1 || !z2) return 0;
+  const low = Math.max(z1.low, z2.low);
+  const high = Math.min(z1.high, z2.high);
+  if(high <= low) return 0;
+  const inter = high - low;
+  const union = Math.max(z1.high, z2.high) - Math.min(z1.low, z2.low);
+  return inter/union;
+}
+
+/* Build fallback pseudo-OHLC from market_chart daily closes (array [[ts,price],...]) */
+function buildOHLCFromDailyCloses(prices){
+  // produce OHLC candles where open = previous close, close = this close, high/low = max/min(open,close)
+  if(!prices || prices.length < 2) return null;
+  const out = [];
+  for(let i=1;i<prices.length;i++){
+    const open = prices[i-1][1];
+    const close = prices[i][1];
+    const high = Math.max(open, close);
+    const low = Math.min(open, close);
+    out.push({t: prices[i][0], o: open, h: high, l: low, c: close});
+  }
+  return out;
+}
+
+/* ================== FETCH HELPERS (OHLC robust) ================== */
+async function fetchTopCoins(n=TOP_SCAN){
+  try {
+    const url = `${COINGECKO}/coins/markets?vs_currency=usd&order=volume_desc&per_page=${n}&page=1&sparkline=false`;
+    const r = await fetch(url);
+    if(!r.ok) throw new Error("markets fetch failed");
+    const list = await r.json();
+    return list.filter(c=>{
+      const id=(c.id||"").toLowerCase();
+      if(EXCLUDE_STABLES.some(x=> id.includes(x))) return false;
+      if(id.includes("usd")) return false;
+      return true;
+    });
+  } catch(e){
+    console.error("fetchTopCoins", e);
+    return [];
+  }
+}
+
+/* Try to fetch OHLC; try several 'days' fallbacks; if /ohlc fails, fallback to market_chart daily closes and synthesize OHLC */
+async function fetchDailyOHLC(coinId){
+  const tryDays = [30,14,7,2];
+  // try /ohlc endpoint first with multiple days
+  for(const d of tryDays){
+    try {
+      const url = `${COINGECKO}/coins/${encodeURIComponent(coinId)}/ohlc?vs_currency=usd&days=${d}`;
+      const r = await fetch(url);
+      if(r.ok){
+        const j = await r.json();
+        if(Array.isArray(j) && j.length >= 2){
+          // j is array of [ts, open, high, low, close]
+          const candles = j.map(item => ({t: item[0], o: item[1], h: item[2], l: item[3], c: item[4]}));
+          return candles;
+        }
+      }
+    } catch(e){
+      // continue to next fallback
+    }
+    await sleep(120);
+  }
+
+  // fallback: use market_chart daily closes (days fallback) and synthesize OHLC
+  for(const d of tryDays){
+    try {
+      const url = `${COINGECKO}/coins/${encodeURIComponent(coinId)}/market_chart?vs_currency=usd&days=${d}&interval=daily`;
+      const r = await fetch(url);
+      if(!r.ok) continue;
+      const j = await r.json();
+      if(j && Array.isArray(j.prices) && j.prices.length >= 2){
+        const synthesized = buildOHLCFromDailyCloses(j.prices);
+        if(synthesized && synthesized.length >= 2) return synthesized;
+      }
+    } catch(e){
+      // ignore
+    }
+    await sleep(120);
+  }
+
+  return null;
+}
+
+async function fetchCurrentPrice(coinId){
+  try {
+    const url = `${COINGECKO}/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd`;
+    const r = await fetch(url);
+    if(!r.ok) return null;
+    const j = await r.json();
+    if(j && j[coinId] && j[coinId].usd) return j[coinId].usd;
+    return null;
+  } catch(e){ return null; }
+}
+
+/* ================== SIGNAL GENERATION (daily OHLC) ================== */
+function generateDailySignal(prev, last, piv, ob){
+  // prev and last are full OHLC {t,o,h,l,c}
+  const open = prev.o, close = last.c;
+  const range = Math.abs(close - open);
+  if(range === 0) return null; // rare exact same - skip
+  let type = (close > open) ? "LONG" : "SHORT";
+  let sl = null, tp = null;
+  if(type === "LONG"){
+    sl = close - range;
+    tp = close + range * RR;
+  } else {
+    sl = close + range;
+    tp = close - range * RR;
+  }
+  const reasons = [];
+  if(piv){
+    if(type === "LONG" && piv.S1 && Math.abs(close - piv.S1)/piv.S1 < 0.01) reasons.push("Pivot S1");
+    if(type === "SHORT" && piv.R1 && Math.abs(close - piv.R1)/piv.R1 < 0.01) reasons.push("Pivot R1");
+  }
+  if(ob){
+    if(type==="LONG" && ob.bullOB) reasons.push("Bull OB");
+    if(type==="SHORT" && ob.bearOB) reasons.push("Bear OB");
+  }
+  return {
+    date: new Date(prev.t).toLocaleDateString(),
+    price: roundN(close,2),
+    type,
+    stopLoss: roundN(sl,2),
+    takeProfit: roundN(tp,2),
+    status: "OPEN",
+    reason: reasons.length ? reasons.join(" • ") : "Candle"
+  };
+}
+
+/* confidence scoring */
+function scoreConfidence({emaAlign, paConfirm, obMatch, pivotMatch, notOverext}){
+  let s=0; if(emaAlign) s+=35; if(paConfirm) s+=25; if(obMatch) s+=20; if(pivotMatch) s+=10; if(notOverext) s+=10;
+  return Math.min(100, s);
+}
+
+/* /* archive closed trades */
+function archiveTrade(coinId, sig){
+  let history = JSON.parse(localStorage.getItem("historyTrades") || "[]");
+  history.push({
+    coinId,
+    ...sig,
+    archivedAt: new Date().toLocaleString()
+  });
+  localStorage.setItem("historyTrades", JSON.stringify(history));
+}
+
+/* update signal state with archiving */
+function updateSignalState(sig, latestPrice, coinId){
+  if(!sig || sig.status !== "OPEN") return sig;
+  const lp = Number(latestPrice);
+
+  if(sig.type === "LONG"){
+    if(lp >= Number(sig.takeProfit)) sig.status = "VALIDATED";
+    else if(lp <= Number(sig.stopLoss)) sig.status = "INVALIDATED";
+  } else if(sig.type === "SHORT"){
+    if(lp <= Number(sig.takeProfit)) sig.status = "VALIDATED";
+    else if(lp >= Number(sig.stopLoss)) sig.status = "INVALIDATED";
+  }
+
+  // if trade just closed → archive + remove from live dashboard
+  if(sig.status === "VALIDATED" || sig.status === "INVALIDATED"){
+    archiveTrade(coinId, sig);
+    delete window.signals[coinId];
+    const card = window.cardMap.get(coinId);
+    if(card){ card.remove(); window.cardMap.delete(coinId); }
+  }
+  return sig;
+}
+
+/* ================== ANALYZE ONE COIN ================== */
+async function analyzeCoin(coin){
+  try {
+    // fetch up to 30-day OHLC (or fallback synth)
+    const ohlc = await fetchDailyOHLC(coin.id);
+    if(!ohlc || ohlc.length < 2) return { error: "not enough daily OHLC", coin };
+
+    // use the last two candles for signal (prev,last)
+    const lastIdx = ohlc.length - 1;
+    const prev = ohlc[lastIdx-1];
+    const last = ohlc[lastIdx];
+
+    // use longer history (whole ohlc array) for EMA/ATR/OB/pivots
+    const closes = ohlc.map(c=>c.c);
+    const highs = ohlc.map(c=>c.h);
+    const lows = ohlc.map(c=>c.l);
+
+    const ema20 = emaSeriesFromCloses(closes, 20)[lastIdx] || null;
+    const ema50 = emaSeriesFromCloses(closes, 50)[lastIdx] || null;
+    const ema200 = emaSeriesFromCloses(closes, 200)[lastIdx] || null;
+
+    const atr = ATR(highs, lows, closes, ATR_PERIOD);
+    const pa = detectPA(ohlc);
+    const piv = pivots_from_prev(prev.h, prev.l, prev.c);
+    const dailyOB = findOrderBlocks(ohlc, 60);
+
+    // OB strength: if there's bullOB and bearOB we only consider the one matching signal later
+    let obZone = null;
+    let obStrength = 0;
+    if(dailyOB.bullOB || dailyOB.bearOB){
+      obZone = dailyOB.bullOB || dailyOB.bearOB;
+      obStrength = 0.5; // single timeframe OB -> moderate strength
+    }
+
+    // generate base signal (always if prev->last show move)
+    const baseSignal = generateDailySignal(prev, last, piv, dailyOB);
+
+    // preferred entry logic
+    const latestPrice = last.c;
+    let preferredEntry = latestPrice;
+    if(baseSignal && ema20){
+      if(baseSignal.type === "LONG") preferredEntry = Math.min(latestPrice, ema20);
+      if(baseSignal.type === "SHORT") preferredEntry = Math.max(latestPrice, ema20);
+    }
+    if(obZone && baseSignal){
+      if(baseSignal.type === "LONG") preferredEntry = Math.min(preferredEntry, obZone.low);
+      if(baseSignal.type === "SHORT") preferredEntry = Math.max(preferredEntry, obZone.high);
+    }
+
+    // checks for confidence
+    const obMatch = obZone ? (preferredEntry <= obZone.high && preferredEntry >= obZone.low) : false;
+    let pivotMatch = false;
+    if(preferredEntry && piv){
+      for(const v of [piv.S1, piv.P, piv.R1]){
+        if(!v) continue;
+        if(Math.abs(preferredEntry - v)/v*100 < 0.8){ pivotMatch = true; break; }
+      }
+    }
+    const paConfirm = (baseSignal && baseSignal.type === "LONG" && pa.engulf === "bull") || (baseSignal && baseSignal.type === "SHORT" && pa.engulf === "bear");
+    const alignmentBull = ema20 && ema50 && ema200 && ema20 > ema50 && ema50 > ema200;
+    const alignmentBear = ema20 && ema50 && ema200 && ema20 < ema50 && ema50 < ema200;
+    const emaAlign = baseSignal ? ((baseSignal.type==="LONG" && alignmentBull) || (baseSignal.type==="SHORT" && alignmentBear)) : false;
+    const dist20pct = ema20 ? ((latestPrice - ema20)/ema20)*100 : 0;
+    const notOverext = baseSignal ? !(baseSignal.type==="LONG" ? dist20pct > OVEREXT_PCT : baseSignal.type==="SHORT" ? dist20pct < -OVEREXT_PCT : false) : false;
+
+    const confidence = scoreConfidence({emaAlign, paConfirm, obMatch, pivotMatch, notOverext});
+
+    return {
+      coin,
+      ohlc,
+      prev, last,
+      baseSignal,
+      ema: {ema20, ema50, ema200},
+      atr, pa, piv,
+      dailyOB, obZone, obStrength,
+      preferredEntry,
+      obMatch, pivotMatch, paConfirm, emaAlign, notOverext,
+      confidence,
+      latestPrice
+    };
+  } catch(e){
+    console.error("analyzeCoin err", e);
+    return { error: String(e), coin };
+  }
+}
+
+/* ================== RENDER / UPDATES (GG UI) ================== */
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+const refreshBtn = document.getElementById('refreshBtn');
+const intervalSel = document.getElementById('interval');
+const displaySel = document.getElementById('displayCount');
+
+refreshBtn.onclick = ()=> fetchAndRender();
+intervalSel.onchange = ()=> {
+  intervalMs = Number(intervalSel.value);
+  if(loopHandle) clearInterval(loopHandle);
+  loopHandle = setInterval(fetchAndRender, intervalMs);
+};
+displaySel.onchange = ()=> { displayCount = Number(displaySel.value); };
+
+/* color helpers */
+function strengthColor(val){
+  if(val >= 0.7) return "var(--good)";
+  if(val >= 0.4) return "#ffd966";
+  return "var(--bad)";
+}
+
+/* Upsert card in place */
+
+
+    
+/* Upsert card in place (BOLD ENTRIES VERSION) */
+function upsertCard(res, persistedSignal){
+  const id = res.coin.id;
+  let card = window.cardMap.get(id);
+  const c = res.coin;
+  const base = res.baseSignal;
+  const s = persistedSignal || base || {type:"HOLD", status:"N/A"};
+  const obStrengthVal = (typeof res.obStrength === 'number' && !isNaN(res.obStrength)) ? res.obStrength : 0;
+  const conf = res.confidence || 0;
+  const confBadge = `<div class="small badge">Conf ${conf}%</div>`;
+  const strBadge = `<div class="small badge" style="color:${strengthColor(obStrengthVal)}">Strength ${(obStrengthVal*100).toFixed(0)}%</div>`;
+
+  const inner = `
+    <div class="h">
+      <div>
+        <h3>${c.name} (${(c.symbol||"?").toUpperCase()})</h3>
+      </div>
+      <div>
+        ${confBadge}
+        ${strBadge}
+      </div>
+    </div>
+
+    <div class="sig" style="margin-top:10px">
+      <div style="font-size:14px;">Signal: 
+        <strong class="${(s.type==='LONG')?'long':(s.type==='SHORT')?'short':'neutral'}">${s.type}</strong> 
+        • Status: <span>${s.status}</span>
+      </div>
+      <div style="margin-top:6px;font-size:14px;">
+        <strong>OrigEntry:</strong> ${base?fmtUSD(base.price):'N/A'}
+      </div>
+      <div style="font-size:14px;">
+        <strong>PreferredEntry:</strong> ${fmtUSD(res.preferredEntry)}
+      </div>
+      <div style="font-size:14px;">
+        <strong>TP:</strong> ${s.takeProfit?fmtUSD(s.takeProfit):'N/A'} 
+        | <strong>SL:</strong> ${s.stopLoss?fmtUSD(s.stopLoss):'N/A'}
+      </div>
+    </div>
+  `;
+
+  if(card){
+    card.innerHTML = inner;
+  } else {
+    card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = inner;
+    grid.appendChild(card);
+    window.cardMap.set(id, card);
+  }
+}
+/* show collapsed errors */
+function renderErrors(errors){
+  const existing = document.getElementById('errors-card');
+  if(existing) existing.remove();
+  if(!errors || !errors.length) return;
+  const ec = document.createElement('div');
+  ec.className = 'card';
+  ec.id = 'errors-card';
+  const list = errors.map(e=>{
+    const name = e.coin ? `${e.coin.name} (${(e.coin.symbol||"?").toUpperCase()})` : 'Unknown';
+    return `<div style="margin-bottom:6px"><strong>${name}</strong> — <span class="small muted">${String(e.error)}</span></div>`;
+  }).join('');
+  ec.innerHTML = `<details><summary>⚠️ Errors (${errors.length}) — click to expand</summary><div style="margin-top:8px">${list}</div></details>`;
+  grid.appendChild(ec);
+}
+
+/* ================== ORCHESTRATION: continuous scan ================== */
+async function fetchAndRender(){
+  try {
+    status.innerHTML = `Fetching top ${TOP_SCAN} <span class="spinner"></span>`;
+    const top = await fetchTopCoins(TOP_SCAN);
+    const errors = [];
+    let rendered = 0;
+    // iterate top list but only render/display up to displayCount for the UI
+    for(let i=0; i<top.length && rendered < displayCount; i++){
+      const coin = top[i];
+      status.innerHTML = `Analyzing ${i+1}/${top.length}: ${coin.name} <span class="spinner"></span>`;
+      const res = await analyzeCoin(coin);
+      if(res && res.error){
+        errors.push(res);
+        continue;
+      }
+      if(!res) continue;
+
+      // Create new signal only if there's no open persisted signal for this coin
+      const existing = window.signals[res.coin.id];
+      if(res.baseSignal && (!existing || existing.status !== "OPEN")){
+        // persist baseSignal
+        window.signals[res.coin.id] = {
+          type: res.baseSignal.type,
+          status: res.baseSignal.status,
+          date: res.baseSignal.date,
+          price: res.baseSignal.price,
+          stopLoss: res.baseSignal.stopLoss,
+          takeProfit: res.baseSignal.takeProfit,
+          reason: res.baseSignal.reason
+        };
+      }
+
+      // update existing open signal with live price
+      const livePrice = await fetchCurrentPrice(res.coin.id);
+      if(livePrice != null && window.signals[res.coin.id]){
+        const updated = Object.assign({}, window.signals[res.coin.id]);
+        updateSignalState(updated, livePrice, res.coin.id);
+        window.signals[res.coin.id] = updated;
+      }
+
+      // show persisted signal if present, otherwise baseSignal
+      const signalState = window.signals[res.coin.id] || res.baseSignal || null;
+
+      upsertCard(res, signalState);
+      rendered++;
+      await sleep(150); // polite pace to avoid hammering API
+    }
+
+    renderErrors(errors);
+    status.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+  } catch(e){
+    console.error("fetchAndRender err", e);
+    status.textContent = "Error fetching data";
+  }
+}
+
+/* start scanning */
+fetchAndRender();
+loopHandle = setInterval(fetchAndRender, intervalMs);
+
+</script>
+</body>
+</html>

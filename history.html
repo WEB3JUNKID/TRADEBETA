@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Trade History — GG UI</title>
+<style>
+  :root{
+    --bg:#07121a; --muted:#9fb2c8; --accent:#59c6ff; --good:#86efac; --bad:#ff7b7b;
+    --card-bg: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+  }
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,var(--bg),#031219);color:#e6f3fb;padding:18px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  h1{margin:0;font-size:20px;color:var(--accent)}
+  .sub{color:var(--muted);font-size:13px}
+  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
+  .card{background:var(--card-bg);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
+  .h{display:flex;justify-content:space-between;align-items:center}
+  .mono{font-family:ui-monospace,Menlo,Monaco,"Roboto Mono",monospace}
+  .small{font-size:12px;color:var(--muted)}
+  .long{color:var(--good);font-weight:700}
+  .short{color:var(--bad);font-weight:700}
+  .neutral{color:var(--muted);font-weight:700}
+  .sig{margin-top:8px}
+  footer{margin-top:14px;color:var(--muted);font-size:13px}
+  .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.02);font-size:12px}
+</style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Trade History</h1>
+      <div class="sub">Track past trade calls</div>
+    </div>
+    <div id="winrate" class="sub"></div>
+  </header>
+
+  <div id="grid"></div>
+
+  <footer class="small muted">
+    Stored locally in your browser. Clearing your browser storage to reset history.
+  </footer>
+
+<script>
+function fmtUSD(x){ if(x==null || isNaN(x)) return "N/A"; if(Math.abs(x)>=1000) return "$"+Number(x).toLocaleString(undefined,{maximumFractionDigits:2}); return "$"+Number(x).toFixed(2); }
+
+function loadHistory(){
+  return JSON.parse(localStorage.getItem("historyTrades") || "[]");
+}
+
+function render(){
+  const history = loadHistory();
+  const grid = document.getElementById("grid");
+  grid.innerHTML = "";
+
+  let wins = 0, losses = 0;
+  history.forEach(trade=>{
+    if(trade.status === "VALIDATED") wins++;
+    else if(trade.status === "INVALIDATED") losses++;
+
+    const inner = `
+      <div class="h">
+        <div>
+          <h3>${trade.coinId.toUpperCase()}</h3>
+          <div class="small">Date: ${trade.date}</div>
+        </div>
+        <div>
+          <span class="badge">${trade.status}</span>
+        </div>
+      </div>
+      <div class="sig">
+        <div>Signal: <strong class="${trade.type==='LONG'?'long':trade.type==='SHORT'?'short':'neutral'}">${trade.type}</strong></div>
+        <div class="small mono">Entry: ${fmtUSD(trade.price)} | SL: ${fmtUSD(trade.stopLoss)} | TP: ${fmtUSD(trade.takeProfit)}</div>
+        <div class="small">Reason: ${trade.reason || ''}</div>
+        <div class="small">Closed: ${trade.archivedAt}</div>
+      </div>
+    `;
+
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = inner;
+    grid.appendChild(card);
+  });
+
+  const total = wins + losses;
+  const wr = total > 0 ? ((wins/total)*100).toFixed(1) : "0.0";
+  document.getElementById("winrate").textContent = `Win rate: ${wins}/${total} = ${wr}%`;
+}
+
+render();
+</script>
+</body>
+</html>

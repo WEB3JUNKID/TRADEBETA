@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign Up</title>
+  <link rel="stylesheet" href="signup.css">
+</head>
+<body>
+  <div class="signup-container">
+    <div class="signup-card">
+      <div class="signup-header">
+        <h1>Create Account</h1>
+        <p>Sign up to get started</p>
+      </div>
+
+      <div id="alert" class="alert"></div>
+
+      <form id="signup-form">
+        <div class="form-group">
+          <label>Email</label>
+          <input type="email" id="signup-email" placeholder="Enter your email" required>
+        </div>
+        <div class="form-group password-input-group">
+          <label>Password</label>
+          <input type="password" id="signup-password" placeholder="Enter your password" required>
+        </div>
+        <div class="form-navigation">
+          <button type="submit" class="btn">Sign Up</button>
+        </div>
+      </form>
+
+      <div class="signup-footer">
+        Already have an account? <a href="login.html">Log in</a>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-analytics.js";
+  import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyA1vuT6ymi7vCcn7SPE7gZKN1MyD0zBuGc",
+    authDomain: "tradebeta-18ffc.firebaseapp.com",
+    projectId: "tradebeta-18ffc",
+    storageBucket: "tradebeta-18ffc.firebasestorage.app",
+    messagingSenderId: "786972465731",
+    appId: "1:786972465731:web:7e2a6e49a36fb238e212f6",
+    measurementId: "G-DLFY9P02CG"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  getAnalytics(app);
+  const auth = getAuth(app);
+
+  const alertBox = document.getElementById('alert');
+  const signupForm = document.getElementById('signup-form');
+
+  signupForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const email = document.getElementById('signup-email').value;
+    const password = document.getElementById('signup-password').value;
+
+    createUserWithEmailAndPassword(auth, email, password)
+      .then((userCredential) => {
+        // Optionally show success message first:
+        // alertBox.className = 'alert alert-success';
+        // alertBox.textContent = 'Account created successfully! Redirecting...';
+
+        // Immediately redirect to login page
+        window.location.href = 'login.html';
+      })
+      .catch((error) => {
+        alertBox.className = 'alert alert-error';
+        alertBox.textContent = error.message;
+      });
+  });
+</script>
+</body>
+</html>

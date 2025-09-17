@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "routes": [
+    { "src": "/signup", "dest": "/signup.html" },
+    { "src": "/login", "dest": "/login.html" },
+    { "src": "/dashboard", "dest": "/dashboard.html" },
+    { "src": "/history", "dest": "/history.html" },
+    { "src": "/", "dest": "/index.html" }
+  ]
+}
