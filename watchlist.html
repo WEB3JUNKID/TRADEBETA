@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>My Watchlist</title>
+<style>
+  body { font-family: Inter, sans-serif; background: #07121a; color: #e6f3fb; padding: 18px; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px,1fr)); gap: 12px; margin-top: 12px; }
+  .card { background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.03); }
+  .h { display: flex; justify-content: space-between; align-items: center; }
+  .badge { padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,0.05); font-size: 12px; }
+  .long { color: #86efac; font-weight: 700; }
+  .short { color: #ff7b7b; font-weight: 700; }
+  .neutral { color: #9fb2c8; font-weight: 700; }
+</style>
+</head>
+<body>
+<h1>My Watchlist</h1>
+<div id="grid"><p>Loading...</p></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyA1vuT6ymi7vCcn7SPE7gZKN1MyD0zBuGc",
+  authDomain: "tradebeta-18ffc.firebaseapp.com",
+  projectId: "tradebeta-18ffc",
+  storageBucket: "tradebeta-18ffc.appspot.com",
+  messagingSenderId: "786972465731",
+  appId: "1:786972465731:web:7e2a6e49a36fb238e212f6"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const grid = document.getElementById('grid');
+
+onAuthStateChanged(auth, user => {
+  if(!user) { 
+    window.location.href = "login.html"; 
+    return; 
+  }
+  loadWatchlist(user.uid);
+});
+
+function loadWatchlist(uid){
+  const watchlistRef = collection(db, `users/${uid}/watchlist`);
+  let refreshInterval = null;
+
+  onSnapshot(watchlistRef, snapshot => {
+    grid.innerHTML = '';
+    if(snapshot.empty){ 
+      grid.innerHTML = '<p>No signals in your watchlist.</p>'; 
+      return; 
+    }
+
+    const coinIds = [];
+
+    snapshot.forEach(docSnap => {
+      const s = docSnap.data();
+      const id = docSnap.id;
+      coinIds.push(s.coinId);
+
+      const trackedAt = s.trackedAt ? new Date(s.trackedAt) : new Date();
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.coinId = s.coinId;
+      card.dataset.docId = id;
+      card.dataset.signalType = s.signalType;
+      card.dataset.tp = s.tp || "";
+      card.dataset.sl = s.sl || "";
+      card.dataset.status = s.analysisStatus || "OPEN";
+
+      card.innerHTML = `
+        <div class="h">
+          <div><h3>${s.name || "Unknown"} (${s.symbol?.toUpperCase() || "?"})</h3></div>
+          <div class="badge ${s.signalType?.toLowerCase() || "neutral"}">${s.signalType || "NEUTRAL"}</div>
+        </div>
+        <p><strong>Preferred Entry:</strong> ${s.preferredEntry || "N/A"}</p>
+        <p><strong>Original Entry:</strong> ${s.origEntry || "N/A"}</p>
+        <p><strong>Take Profit (TP):</strong> ${s.tp || "N/A"}</p>
+        <p><strong>Stop Loss (SL):</strong> ${s.sl || "N/A"}</p>
+        <p class="status"><strong>Status:</strong> ${s.analysisStatus || "OPEN"}</p>
+        <p><strong>Reason:</strong> ${s.reason || "—"}</p>
+        <p><strong>Tracked At:</strong> ${trackedAt.toLocaleString()}</p>
+      `;
+      grid.appendChild(card);
+    });
+
+    // Refresh statuses with CoinGecko
+    async function refreshStatuses() {
+      if (coinIds.length === 0) return;
+      const idsParam = [...new Set(coinIds)].join(',');
+      try {
+        const res = await fetch(
+          `https://api.coingecko.com/api/v3/simple/price?ids=${idsParam}&vs_currencies=usd`
+        );
+        const prices = await res.json();
+
+        document.querySelectorAll('.card').forEach(async card => {
+          const coinId = card.dataset.coinId;
+          const sigType = card.dataset.signalType;
+          const tp = parseFloat(card.dataset.tp);
+          const sl = parseFloat(card.dataset.sl);
+          const docId = card.dataset.docId;
+          const statusP = card.querySelector('.status');
+          let currentStatus = card.dataset.status;
+
+          const priceData = prices[coinId];
+          if (!priceData) return;
+          const latestPrice = priceData.usd;
+
+          if (currentStatus === "OPEN") {
+            let newStatus = currentStatus;
+            if (sigType === "LONG") {
+              if (!isNaN(tp) && latestPrice >= tp) newStatus = "VALIDATED";
+              else if (!isNaN(sl) && latestPrice <= sl) newStatus = "INVALIDATED";
+            } else if (sigType === "SHORT") {
+              if (!isNaN(tp) && latestPrice <= tp) newStatus = "VALIDATED";
+              else if (!isNaN(sl) && latestPrice >= sl) newStatus = "INVALIDATED";
+            }
+
+            if (newStatus !== currentStatus) {
+              // Update UI
+              statusP.innerHTML = `<strong>Status:</strong> ${newStatus}`;
+              statusP.style.color = newStatus === "VALIDATED" ? "#86efac" : "#ff7b7b";
+              card.dataset.status = newStatus;
+
+              // Move trade to history
+              const uid = auth.currentUser.uid;
+              const histRef = doc(db, `users/${uid}/history/${docId}`);
+              await setDoc(histRef, {
+                ...Object.fromEntries([...card.querySelectorAll("p")].map(p => [p.innerText.split(":")[0], p.innerText.split(":")[1].trim()])),
+                name: card.querySelector("h3").innerText.split("(")[0].trim(),
+                symbol: card.querySelector("h3").innerText.match(/\((.*?)\)/)?.[1] || "?",
+                signalType: sigType,
+                analysisStatus: newStatus,
+                archivedAt: serverTimestamp()
+              });
+              const watchRef = doc(db, `users/${uid}/watchlist/${docId}`);
+              await deleteDoc(watchRef);
+            }
+          }
+        });
+      } catch(e) {
+        console.error("Price fetch error:", e);
+      }
+    }
+
+    refreshStatuses();
+    if (!refreshInterval) {
+      refreshInterval = setInterval(refreshStatuses, 120000); // every 2 minutes
+    }
+  });
+}
+</script>
+</body>
+</html>

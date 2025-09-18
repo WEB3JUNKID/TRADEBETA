@@ -1,93 +1,118 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8"/>
+<meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Trade History — GG UI</title>
+<title>Trade History</title>
 <style>
-  :root{
-    --bg:#07121a; --muted:#9fb2c8; --accent:#59c6ff; --good:#86efac; --bad:#ff7b7b;
-    --card-bg: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
-  }
-  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,var(--bg),#031219);color:#e6f3fb;padding:18px}
-  header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-  h1{margin:0;font-size:20px;color:var(--accent)}
-  .sub{color:var(--muted);font-size:13px}
-  #grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
-  .card{background:var(--card-bg);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.03)}
-  .h{display:flex;justify-content:space-between;align-items:center}
-  .mono{font-family:ui-monospace,Menlo,Monaco,"Roboto Mono",monospace}
-  .small{font-size:12px;color:var(--muted)}
-  .long{color:var(--good);font-weight:700}
-  .short{color:var(--bad);font-weight:700}
-  .neutral{color:var(--muted);font-weight:700}
-  .sig{margin-top:8px}
-  footer{margin-top:14px;color:var(--muted);font-size:13px}
-  .badge{display:inline-block;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,0.02);font-size:12px}
+  body { font-family: Inter, sans-serif; background: #07121a; color: #e6f3fb; padding: 18px; }
+  h1 { margin-bottom: 10px; }
+  #summary { background: rgba(255,255,255,0.05); padding: 12px; border-radius: 10px; display: flex; justify-content: space-around; margin-bottom: 20px; }
+  .metric { text-align: center; }
+  .metric h2 { margin: 0; font-size: 22px; }
+  .metric p { margin: 0; font-size: 14px; color: #9fb2c8; }
+  #grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px,1fr)); gap: 12px; }
+  .card { background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.03); }
+  .h { display: flex; justify-content: space-between; align-items: center; }
+  .badge { padding: 4px 8px; border-radius: 999px; font-size: 12px; }
+  .long { color: #86efac; font-weight: 700; }
+  .short { color: #ff7b7b; font-weight: 700; }
+  .neutral { color: #9fb2c8; font-weight: 700; }
+  .win { color: #86efac; font-weight: bold; }
+  .loss { color: #ff7b7b; font-weight: bold; }
 </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Trade History</h1>
-      <div class="sub">Track past trade calls</div>
-    </div>
-    <div id="winrate" class="sub"></div>
-  </header>
+<h1>Trade History</h1>
+<div id="summary">
+  <div class="metric"><h2 id="total">0</h2><p>Total Trades</p></div>
+  <div class="metric"><h2 id="wins">0</h2><p>Wins</p></div>
+  <div class="metric"><h2 id="losses">0</h2><p>Losses</p></div>
+  <div class="metric"><h2 id="winrate">0%</h2><p>Win Rate</p></div>
+</div>
+<div id="grid"><p>Loading...</p></div>
 
-  <div id="grid"></div>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+import { getFirestore, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
 
-  <footer class="small muted">
-    Stored locally in your browser. Clearing your browser storage to reset history.
-  </footer>
+const firebaseConfig = {
+  apiKey: "AIzaSyA1vuT6ymi7vCcn7SPE7gZKN1MyD0zBuGc",
+  authDomain: "tradebeta-18ffc.firebaseapp.com",
+  projectId: "tradebeta-18ffc",
+  storageBucket: "tradebeta-18ffc.appspot.com",
+  messagingSenderId: "786972465731",
+  appId: "1:786972465731:web:7e2a6e49a36fb238e212f6"
+};
 
-<script>
-function fmtUSD(x){ if(x==null || isNaN(x)) return "N/A"; if(Math.abs(x)>=1000) return "$"+Number(x).toLocaleString(undefined,{maximumFractionDigits:2}); return "$"+Number(x).toFixed(2); }
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
 
-function loadHistory(){
-  return JSON.parse(localStorage.getItem("historyTrades") || "[]");
-}
+const grid = document.getElementById('grid');
+const totalEl = document.getElementById('total');
+const winsEl = document.getElementById('wins');
+const lossesEl = document.getElementById('losses');
+const winrateEl = document.getElementById('winrate');
 
-function render(){
-  const history = loadHistory();
-  const grid = document.getElementById("grid");
-  grid.innerHTML = "";
+onAuthStateChanged(auth, user => {
+  if(!user) { 
+    window.location.href = "login.html"; 
+    return; 
+  }
+  loadHistory(user.uid);
+});
 
-  let wins = 0, losses = 0;
-  history.forEach(trade=>{
-    if(trade.status === "VALIDATED") wins++;
-    else if(trade.status === "INVALIDATED") losses++;
+function loadHistory(uid){
+  const historyRef = collection(db, `users/${uid}/history`);
+  onSnapshot(historyRef, snapshot => {
+    grid.innerHTML = '';
+    if(snapshot.empty){ 
+      grid.innerHTML = '<p>No trades in your history.</p>'; 
+      updateSummary(0,0,0);
+      return; 
+    }
 
-    const inner = `
-      <div class="h">
-        <div>
-          <h3>${trade.coinId.toUpperCase()}</h3>
-          <div class="small">Date: ${trade.date}</div>
+    let total = 0, wins = 0, losses = 0;
+
+    snapshot.forEach(docSnap => {
+      const s = docSnap.data();
+      total++;
+
+      let outcome = "";
+      if (s.analysisStatus === "VALIDATED") { outcome = "Win"; wins++; }
+      if (s.analysisStatus === "INVALIDATED") { outcome = "Loss"; losses++; }
+
+      const archivedAt = s.archivedAt?.toDate ? s.archivedAt.toDate() : new Date();
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div class="h">
+          <div><h3>${s.name || "Unknown"} (${s.symbol?.toUpperCase() || "?"})</h3></div>
+          <div class="badge ${s.signalType?.toLowerCase() || "neutral"}">${s.signalType || "NEUTRAL"}</div>
         </div>
-        <div>
-          <span class="badge">${trade.status}</span>
-        </div>
-      </div>
-      <div class="sig">
-        <div>Signal: <strong class="${trade.type==='LONG'?'long':trade.type==='SHORT'?'short':'neutral'}">${trade.type}</strong></div>
-        <div class="small mono">Entry: ${fmtUSD(trade.price)} | SL: ${fmtUSD(trade.stopLoss)} | TP: ${fmtUSD(trade.takeProfit)}</div>
-        <div class="small">Reason: ${trade.reason || ''}</div>
-        <div class="small">Closed: ${trade.archivedAt}</div>
-      </div>
-    `;
+        
+        <p><strong>Status:</strong> ${s.analysisStatus}</p>
+        <p><strong>Outcome:</strong> <span class="${outcome === "Win" ? "win" : "loss"}">${outcome || "—"}</span></p>
+      
+        <p><strong>Archived At:</strong> ${archivedAt.toLocaleString()}</p>
+      `;
+      grid.appendChild(card);
+    });
 
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = inner;
-    grid.appendChild(card);
+    updateSummary(total, wins, losses);
   });
-
-  const total = wins + losses;
-  const wr = total > 0 ? ((wins/total)*100).toFixed(1) : "0.0";
-  document.getElementById("winrate").textContent = `Win rate: ${wins}/${total} = ${wr}%`;
 }
 
-render();
+function updateSummary(total, wins, losses) {
+  const winRate = total > 0 ? Math.round((wins / total) * 100) : 0;
+  totalEl.textContent = total;
+  winsEl.textContent = wins;
+  lossesEl.textContent = losses;
+  winrateEl.textContent = winRate + "%";
+}
 </script>
 </body>
 </html>
